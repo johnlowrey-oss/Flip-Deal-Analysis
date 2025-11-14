@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>House Flip Deal Analyzer</title>
     <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com/"></script>
-    <!-- Load React and ReactDOM -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load React and ReactDOM (These are necessary for React to run) -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Load Babel for compiling JSX -->
+    <!-- Load Babel for compiling JSX (This lets the browser read the JSX) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Custom style -->
+    <!-- Custom style to ensure body and React app use the full screen -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
             font-family: 'Inter', sans-serif;
             margin: 0;
-            background-color: #f9fafb;
+            background-color: #f9fafb; /* Matches the React app's background */
         }
     </style>
 </head>
@@ -27,11 +27,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // --- Custom Hooks & Helpers ---
-
         // Helper to format currency
         const formatCurrency = (value) => {
-          if (isNaN(value)) return '$0';
           return new Intl.NumberFormat('en-US', {
             style: 'currency',
             currency: 'USD',
@@ -41,16 +38,22 @@
         };
 
         // Helper to format percentage
-        const formatPercent = (value) => {
-          if (isNaN(value) || value === Infinity) return '0.0%';
-          return `${(value * 100).toFixed(1)}%`;
-        }
+        const formatPercent = (value) => `${(value * 100).toFixed(1)}%`;
+        
+        // Helper to format whole numbers
+        const formatNumber = (value) => {
+          return new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          }).format(value);
+        };
 
-        // Custom Input Component for main fields (Fix for focus loss)
-        const CostInput = ({ label, value, field, type = 'number', unit = '', placeholder = 0, handler, extraContent }) => {
+        // --- Custom Input Component for main fields (Fix for focus loss) ---
+        const CostInput = ({ label, value, field, type = 'number', unit = '', placeholder = 0, handler, extraContent = null, description = null }) => {
           const [localValue, setLocalValue] = React.useState(value);
           const [isFocused, setIsFocused] = React.useState(false);
 
+          // Sync local state when parent value changes IF not focused
           React.useEffect(() => {
             if (!isFocused) {
               setLocalValue(value);
@@ -58,681 +61,882 @@
           }, [value, isFocused]);
 
           const handleLocalChange = (e) => {
+            // Allows user to type empty string, '.', etc., without state validation snapping back
             setLocalValue(e.target.value);
           };
 
           const handleBlur = () => {
             setIsFocused(false);
+            
             let finalValue = localValue;
             if (type === 'number') {
+              // Coerce to number only on blur, defaulting to 0 if invalid
               finalValue = parseFloat(localValue) || 0;
             }
+            
+            // Update parent state with the finalized numeric value
             handler(field, finalValue);
+            
+            // Resync local state to the clean numeric format
             setLocalValue(finalValue);
           };
           
+          // For initial display if value is 0, show placeholder instead of 0
           const displayValue = isFocused ? localValue : (value === 0 && !isFocused ? '' : value);
 
           return (
-            <div className="flex justify-between items-center py-2 border-b border-gray-100">
-              <label htmlFor={field} className="text-gray-700 text-sm md:text-base">{label}</label>
-              <div className="flex items-center space-x-2">
-                {unit === '$' && <span className="text-gray-500 mr-1">$</span>}
-                <input
-                  id={field}
-                  type="text"
-                  inputMode="numeric"
-                  min="0"
-                  value={displayValue}
-                  onFocus={() => setIsFocused(true)}
-                  onChange={handleLocalChange}
-                  onBlur={handleBlur}
-                  placeholder={placeholder}
-                  className="w-24 text-right py-1 px-2 border rounded-md focus:border-indigo-500 focus:ring-indigo-500 text-sm md:text-base"
-                />
-                {unit === '%' && <span className="text-gray-500 ml-1">%</span>}
-                {unit === 'mo' && <span className="text-gray-500 ml-1 text-sm">months</span>}
-                {extraContent}
+            <div className="py-3 border-b border-gray-100">
+              <div className="flex justify-between items-center">
+                <label htmlFor={field} className="text-gray-700 text-sm md:text-base">{label}</label>
+                <div className="flex items-center space-x-2">
+                  {unit === '$' && <span className="text-gray-500 mr-1">$</span>}
+                  <input
+                    id={field}
+                    type="text" // Use text input type for better control over user input
+                    inputMode="numeric" // Hint for mobile keyboards
+                    min="0"
+                    value={displayValue}
+                    onFocus={() => setIsFocused(true)}
+                    onChange={handleLocalChange}
+                    onBlur={handleBlur}
+                    placeholder={placeholder}
+                    className="w-24 text-right py-1 px-2 border rounded-md focus:border-indigo-500 focus:ring-indigo-500 text-sm md:text-base"
+                  />
+                  {unit === '%' && <span className="text-gray-500 ml-1">%</span>}
+                  {unit === 'mo' && <span className="text-gray-500 ml-1 text-sm">months</span>}
+                  {extraContent}
+                </div>
               </div>
+              {description && (
+                <p className="text-xs text-gray-500 mt-1">{description}</p>
+              )}
             </div>
           );
         };
 
-        // --- Main App Component ---
-        const Root = () => {
-          // --- State for All Calculator Inputs ---
-          
-          // Step 1
-          const [arv, setArv] = React.useState(0);
-          
-          // Step 2
-          const [buyingCosts, setBuyingCosts] = React.useState({
-            loanPointsPercent: 2.0,
-            lendersTitleInsurance: 1000,
-            appraisal: 600,
-            inspection: 400,
-            other: 500,
-          });
-          const [holdingCosts, setHoldingCosts] = React.useState({
-            rehabPeriod: 4,
-            listingPeriod: 2,
-            piti: 0,
-            utilities: 0,
-            insurance: 0,
-            hoa: 0,
-            maintenance: 0,
-            other: 0,
-          });
-          const [sellingCosts, setSellingCosts] = React.useState({
-            brokerageFee: 6.0,
-            ownersTitleInsurance: 1500,
-            homeWarranty: 600,
-            secondAppraisalBPO: 250,
-            staging: 1000,
-            other: 0,
-          });
-          const [financing, setFinancing] = React.useState({
-            isCashBuy: true,
-            loanAmount: 0,
-            interestRate: 7.0,
-          });
+        // --- Dedicated component for Itemized Repair Costs (Fix for focus loss) ---
+        const RepairItemCostInput = ({ id, cost, updateHandler }) => {
+          const [localValue, setLocalValue] = React.useState(cost);
+          const [isFocused, setIsFocused] = React.useState(false);
 
-          // Step 3
-          const [repairCosts, setRepairCosts] = React.useState({
-            items: [],
-            lumpSum: 0,
-            useLumpSum: false,
-            contingencyPercent: 10.0,
-            locationMultiplierPercent: 0,
-            permitCost: 0,
-            contractorOHPercent: 0,
-          });
+          React.useEffect(() => {
+            if (!isFocused) setLocalValue(cost);
+          }, [cost, isFocused]);
 
-          // Step 4
-          const [targetProfitPercent, setTargetProfitPercent] = React.useState(15);
-          
-          // --- Handlers for Updating State ---
-          const handleSimpleUpdate = (setter) => (field, value) => {
-            setter(prev => ({ ...prev, [field]: value }));
+          const handleLocalChange = (e) => setLocalValue(e.target.value);
+
+          const handleBlur = (e) => {
+            setIsFocused(false);
+            const finalValue = parseFloat(e.target.value) || 0;
+            updateHandler(id, 'cost', finalValue);
+            setLocalValue(finalValue);
           };
           
-          const handleRepairUpdate = (id, field, value) => {
-            setRepairCosts(prev => ({
-              ...prev,
-              items: prev.items.map(item =>
-                item.id === id ? { ...item, [field]: value } : item
-              ),
-            }));
-          };
-          
-          const addRepairItem = () => {
-            setRepairCosts(prev => ({
-              ...prev,
-              items: [
-                ...prev.items,
-                { id: Date.now(), description: '', cost: 0 },
-              ],
-            }));
-          };
-
-          const removeRepairItem = (id) => {
-            setRepairCosts(prev => ({
-              ...prev,
-              items: prev.items.filter(item => item.id !== id),
-            }));
-          };
-
-          // --- Suggestion Handlers ---
-          const suggestCosts = (type) => {
-            if (type === 'lendersTitle') {
-              setBuyingCosts(prev => ({ ...prev, lendersTitleInsurance: 1000 }));
-            }
-            if (type === 'appraisal') {
-              setBuyingCosts(prev => ({ ...prev, appraisal: 600 }));
-            }
-            if (type === 'inspection') {
-              setBuyingCosts(prev => ({ ...prev, inspection: 400 }));
-            }
-            if (type === 'ownersTitle') {
-              // CO Avg ~0.5-1.0% of ARV
-              const suggested = Math.max(1500, (arv * 0.007)); // Use $1500 or 0.7%
-              setSellingCosts(prev => ({ ...prev, ownersTitleInsurance: Math.round(suggested) }));
-            }
-            if (type === 'homeWarranty') {
-              setSellingCosts(prev => ({ ...prev, homeWarranty: 600 }));
-            }
-            if (type === 'appraisalBPO') {
-              setSellingCosts(prev => ({ ...prev, secondAppraisalBPO: 250 }));
-            }
-            if (type === 'staging') {
-              setSellingCosts(prev => ({ ...prev, staging: 1000 }));
-            }
-          };
-          
-
-          // --- CORE CALCULATION LOGIC ---
-          const calculations = React.useMemo(() => {
-            const totalHoldingMonths = (parseFloat(holdingCosts.rehabPeriod) || 0) + (parseFloat(holdingCosts.listingPeriod) || 0);
-
-            // 1. Calculate Total Fixed Costs
-            const totalBuyingCosts = (financing.isCashBuy ? 0 : (financing.loanAmount * (buyingCosts.loanPointsPercent / 100))) +
-                                     buyingCosts.lendersTitleInsurance +
-                                     buyingCosts.appraisal +
-                                     buyingCosts.inspection +
-                                     buyingCosts.other;
-                                     
-            const totalMonthlyHolding = holdingCosts.piti + holdingCosts.utilities + holdingCosts.insurance + holdingCosts.hoa + holdingCosts.maintenance + holdingCosts.other;
-            const totalHoldingCosts = totalMonthlyHolding * totalHoldingMonths;
-            
-            const totalSellingCosts = (arv * (sellingCosts.brokerageFee / 100)) +
-                                      sellingCosts.ownersTitleInsurance +
-                                      sellingCosts.homeWarranty +
-                                      sellingCosts.secondAppraisalBPO +
-                                      sellingCosts.staging +
-                                      sellingCosts.other;
-
-            const totalFinancingCosts = financing.isCashBuy ? 0 : (financing.loanAmount * (financing.interestRate / 100 / 12) * totalHoldingMonths);
-            
-            const totalFixedCosts = totalBuyingCosts + totalHoldingCosts + totalSellingCosts + totalFinancingCosts;
-            
-            // 2. Calculate Total Repair Costs (TRC)
-            const baseRepairCost = repairCosts.useLumpSum ? repairCosts.lumpSum : repairCosts.items.reduce((sum, item) => sum + item.cost, 0);
-            const withContingency = baseRepairCost * (1 + (repairCosts.contingencyPercent / 100));
-            const withLocation = withContingency * (1 + (repairCosts.locationMultiplierPercent / 100));
-            const withContractor = withLocation * (1 + (repairCosts.contractorOHPercent / 100));
-            const finalTRC = withContractor + repairCosts.permitCost;
-            
-            // 3. Calculate Profit & MAO
-            const targetProfit = arv * (targetProfitPercent / 100);
-            
-            // This is the core number: MAO = ARV - All Costs - Target Profit
-            const maxPurchasePrice = arv - totalFixedCosts - finalTRC - targetProfit;
-            
-            // 4. Calculate 70% Rule for comparison
-            const mao70Rule = (arv * 0.70) - finalTRC;
-            
-            // 5. Calculate Final Metrics based on calculated MAO
-            const totalProjectCosts = maxPurchasePrice + totalBuyingCosts + finalTRC + totalHoldingCosts + totalFinancingCosts;
-            
-            const debt = financing.isCashBuy ? 0 : financing.loanAmount;
-            
-            // Capital Needed = (Purchase Price - Loan) + Buying Costs + Financing Costs
-            const capitalNeeded = (maxPurchasePrice - debt) + totalBuyingCosts + (financing.isCashBuy ? 0 : (financing.loanAmount * (buyingCosts.loanPointsPercent / 100)));
-            
-            // Total Cash Invested = Capital Needed + Holding Costs + Repair Costs (assuming not financed)
-            const totalCashInvested = capitalNeeded + totalHoldingCosts + finalTRC;
-            
-            const profitPerMonth = (totalHoldingMonths > 0) ? (targetProfit / totalHoldingMonths) : 0;
-            const cashROI = (totalCashInvested > 0) ? (targetProfit / totalCashInvested) : 0;
-            const annualizedROI = (totalHoldingMonths > 0) ? (cashROI * (12 / totalHoldingMonths)) : 0;
-            
-            return {
-              totalFixedCosts,
-              totalBuyingCosts,
-              totalHoldingCosts,
-              totalSellingCosts,
-              totalFinancingCosts,
-              finalTRC,
-              targetProfit,
-              maxPurchasePrice,
-              mao70Rule,
-              totalProjectCosts,
-              capitalNeeded,
-              debt,
-              totalCashInvested,
-              profitPerMonth,
-              cashROI,
-              annualizedROI,
-              totalMonthlyHolding,
-              totalHoldingMonths,
-            };
-            
-          }, [arv, buyingCosts, holdingCosts, sellingCosts, financing, repairCosts, targetProfitPercent]);
-          
-          
-          // --- UI Components for each step ---
-          
-          const Step1_ARV = () => (
-            <div>
-              <h2 className="text-2xl font-bold text-indigo-700 mb-4">Step 1: After Repair Value (ARV)</h2>
-              <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                <CostInput
-                  label="After Repair Value (ARV)"
-                  value={arv}
-                  field="arv"
-                  unit="$"
-                  handler={(field, value) => setArv(value)}
-                />
-              </div>
-            </div>
-          );
-          
-          const Step2_FixedCosts = () => (
-            <div>
-              <h2 className="text-2xl font-bold text-indigo-700 mb-4">Step 2: Fixed Costs</h2>
-              <div className="space-y-6">
-              
-                {/* Buying Costs */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-2 text-indigo-600">Buying Costs</h3>
-                  <CostInput label="Loan Points" value={buyingCosts.loanPointsPercent} field="loanPointsPercent" unit="%" handler={handleSimpleUpdate(setBuyingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Origination fees paid to the lender, typically 1-2% of the loan amount.</p>
-                  
-                  <CostInput 
-                    label="Lender's Title Insurance" 
-                    value={buyingCosts.lendersTitleInsurance} 
-                    field="lendersTitleInsurance" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setBuyingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('lendersTitle')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Required by the lender. Avg. in CO is ~$1,000.</p>
-                  
-                  <CostInput 
-                    label="Appraisal" 
-                    value={buyingCosts.appraisal} 
-                    field="appraisal" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setBuyingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('appraisal')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Lender-required valuation of the property. Avg. in CO is ~$600.</p>
-                  
-                  <CostInput 
-                    label="Inspection" 
-                    value={buyingCosts.inspection} 
-                    field="inspection" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setBuyingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('inspection')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Cost for a general home inspector. Avg. in CO is ~$400.</p>
-
-                  <CostInput label="Other Buying Costs" value={buyingCosts.other} field="other" unit="$" handler={handleSimpleUpdate(setBuyingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Property survey, recording fees, attorney fees, etc. (Can be 0.5-1% of price).</p>
-                  
-                  <div className="p-3 bg-indigo-50 rounded-lg shadow-inner mt-4">
-                    <div className="flex justify-between items-center font-bold text-base text-indigo-800">
-                      <span>Total Buying Costs:</span>
-                      <span>{formatCurrency(calculations.totalBuyingCosts)}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Holding Costs */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-2 text-indigo-600">Holding Costs</h3>
-                  <CostInput label="Rehab Period" value={holdingCosts.rehabPeriod} field="rehabPeriod" unit="mo" handler={handleSimpleUpdate(setHoldingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Estimated time (in months) to complete the renovation.</p>
-                  
-                  <CostInput label="Listing Period" value={holdingCosts.listingPeriod} field="listingPeriod" unit="mo" handler={handleSimpleUpdate(setHoldingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Estimated time (in months) from listing to final sale closing.</p>
-                  
-                  <div className="mt-4 pt-4 border-t">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Itemized Monthly Holding Costs ({formatCurrency(calculations.totalMonthlyHolding)}/mo):</h4>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;PITI (or Debt Service)" value={holdingCosts.piti} field="piti" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                    <p className="text-xs text-gray-500 pl-8 -mt-2 mb-2">Principal, Interest, Taxes, and Insurance.</p>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;Utilities" value={holdingCosts.utilities} field="utilities" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                    <p className="text-xs text-gray-500 pl-8 -mt-2 mb-2">Water, electric, gas, trash, etc.</p>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;Insurance (Property)" value={holdingCosts.insurance} field="insurance" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                    <p className="text-xs text-gray-500 pl-8 -mt-2 mb-2">Vacancy or Builder's Risk policy (if not in PITI).</p>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;HOA Dues" value={holdingCosts.hoa} field="hoa" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                    <p className="text-xs text-gray-500 pl-8 -mt-2 mb-2">Homeowners' Association fees, if applicable.</p>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;Maintenance" value={holdingCosts.maintenance} field="maintenance" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                    <p className="text-xs text-gray-500 pl-8 -mt-2 mb-2">Lawn care, snow removal, etc.</p>
-                    <CostInput label="&nbsp;&nbsp;&nbsp;Other Monthly Costs" value={holdingCosts.other} field="other" unit="$" handler={handleSimpleUpdate(setHoldingCosts)} />
-                  </div>
-                  
-                  <div className="p-3 bg-indigo-50 rounded-lg shadow-inner mt-4">
-                    <div className="flex justify-between items-center font-bold text-base text-indigo-800">
-                      <span>Total Holding Costs ({calculations.totalHoldingMonths} mos):</span>
-                      <span>{formatCurrency(calculations.totalHoldingCosts)}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Selling Costs */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-2 text-indigo-600">Selling Costs</h3>
-                  <CostInput label="Brokerage Fee" value={sellingCosts.brokerageFee} field="brokerageFee" unit="%" handler={handleSimpleUpdate(setSellingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Total commission for both buyer's and seller's agents. Avg. in CO is 5-6%.</p>
-
-                  <CostInput 
-                    label="Owner's Title Insurance" 
-                    value={sellingCosts.ownersTitleInsurance} 
-                    field="ownersTitleInsurance" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setSellingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('ownersTitle')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Seller typically pays. Avg. in CO is 0.5-1.0% of ARV.</p>
-                  
-                  <CostInput 
-                    label="Home Warranty" 
-                    value={sellingCosts.homeWarranty} 
-                    field="homeWarranty" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setSellingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('homeWarranty')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Often offered to the buyer. Avg. in CO is ~$600.</p>
-                  
-                  <CostInput 
-                    label="2nd Appraisal / BPO" 
-                    value={sellingCosts.secondAppraisalBPO} 
-                    field="secondAppraisalBPO" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setSellingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('appraisalBPO')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Cost to verify ARV for your lender or partners. Avg. ~$250.</p>
-                  
-                  <CostInput 
-                    label="Staging" 
-                    value={sellingCosts.staging} 
-                    field="staging" 
-                    unit="$" 
-                    handler={handleSimpleUpdate(setSellingCosts)}
-                    extraContent={
-                      <button onClick={() => suggestCosts('staging')} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition">
-                        Suggest
-                      </button>
-                    }
-                  />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Cost to professionally stage the home for listing. Avg. ~$1000+.</p>
-
-                  <CostInput label="Other Selling Costs" value={sellingCosts.other} field="other" unit="$" handler={handleSimpleUpdate(setSellingCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Seller concessions, repair credits, etc.</p>
-                  
-                  <div className="p-3 bg-indigo-50 rounded-lg shadow-inner mt-4">
-                    <div className="flex justify-between items-center font-bold text-base text-indigo-800">
-                      <span>Total Selling Costs:</span>
-                      <span>{formatCurrency(calculations.totalSellingCosts)}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Financing Costs */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-2 text-indigo-600">Financing</h3>
-                  <div className="flex items-center space-x-4 p-4">
-                    <button
-                      onClick={() => handleSimpleUpdate(setFinancing)('isCashBuy', true)}
-                      className={`px-4 py-2 rounded-full font-semibold transition ${financing.isCashBuy ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-indigo-600 border border-indigo-300'}`}
-                    >
-                      All Cash
-                    </button>
-                    <button
-                      onClick={() => handleSimpleUpdate(setFinancing)('isCashBuy', false)}
-                      className={`px-4 py-2 rounded-full font-semibold transition ${!financing.isCashBuy ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-indigo-600 border border-indigo-300'}`}
-                    >
-                      Financing
-                    </button>
-                  </div>
-                  {!financing.isCashBuy && (
-                    <div className="pt-4 border-t">
-                      <CostInput label="Loan Amount" value={financing.loanAmount} field="loanAmount" unit="$" handler={handleSimpleUpdate(setFinancing)} />
-                      <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Total amount borrowed for the project.</p>
-                      <CostInput label="Interest Rate" value={financing.interestRate} field="interestRate" unit="%" handler={handleSimpleUpdate(setFinancing)} />
-                      <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Annual interest rate on the loan.</p>
-                    </div>
-                  )}
-                  <div className="p-3 bg-indigo-50 rounded-lg shadow-inner mt-4">
-                    <div className="flex justify-between items-center font-bold text-base text-indigo-800">
-                      <span>Total Financing Costs (Interest):</span>
-                      <span>{formatCurrency(calculations.totalFinancingCosts)}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Total Fixed Costs */}
-                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
-                  <div className="flex justify-between items-center font-bold text-xl text-indigo-800">
-                    <span>Total Fixed Costs:</span>
-                    <span>{formatCurrency(calculations.totalFixedCosts)}</span>
-                  </div>
-                </div>
-                
-              </div>
-            </div>
-          );
-          
-          const Step3_RepairCosts = () => (
-            <div>
-              <h2 className="text-2xl font-bold text-indigo-700 mb-4">Step 3: Repair Costs (TRC)</h2>
-              <div className="space-y-6">
-
-                {/* Mode Switch */}
-                <div className="flex items-center space-x-4 p-4 bg-yellow-50 rounded-xl shadow-md border border-yellow-200">
-                  <span className="font-semibold text-yellow-800">Input Mode:</span>
-                  <button
-                    onClick={() => handleSimpleUpdate(setRepairCosts)('useLumpSum', false)}
-                    className={`px-4 py-2 rounded-full font-semibold transition ${!repairCosts.useLumpSum ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-indigo-600 border border-indigo-300'}`}
-                  >
-                    Itemized Costs
-                  </button>
-                  <button
-                    onClick={() => handleSimpleUpdate(setRepairCosts)('useLumpSum', true)}
-                    className={`px-4 py-2 rounded-full font-semibold transition ${repairCosts.useLumpSum ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-indigo-600 border border-indigo-300'}`}
-                  >
-                    Lump Sum
-                  </button>
-                </div>
-
-                {/* Lump Sum or Itemized */}
-                {repairCosts.useLumpSum ? (
-                  <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                    <CostInput label="Lump Sum Repair Cost" value={repairCosts.lumpSum} field="lumpSum" unit="$" handler={handleSimpleUpdate(setRepairCosts)} />
-                  </div>
-                ) : (
-                  <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                    <h3 className="text-xl font-semibold mb-4 text-indigo-600">Itemized Rehab Breakdown</h3>
-                    <div className="grid grid-cols-12 gap-2 font-semibold text-sm text-gray-600 border-b pb-2 mb-2">
-                      <div className="col-span-8">Description</div>
-                      <div className="col-span-3 text-right">Cost ($)</div>
-                      <div className="col-span-1"></div>
-                    </div>
-                    {repairCosts.items.map((item) => (
-                      <div key={item.id} className="grid grid-cols-12 gap-2 items-center py-2 border-b border-gray-100">
-                        <input
-                          type="text"
-                          value={item.description}
-                          onChange={(e) => handleRepairUpdate(item.id, 'description', e.target.value)}
-                          className="col-span-8 p-1 border rounded-md text-sm"
-                          placeholder="e.g., Kitchen Cabinets"
-                        />
-                        <input
-                          type="number"
-                          value={item.cost === 0 ? '' : item.cost}
-                          onChange={(e) => handleRepairUpdate(item.id, 'cost', parseFloat(e.target.value) || 0)}
-                          className="col-span-3 p-1 border rounded-md text-right text-sm"
-                          placeholder="0"
-                        />
-                        <button
-                          onClick={() => removeRepairItem(item.id)}
-                          className="col-span-1 text-red-500 hover:text-red-700 transition"
-                          title="Remove Item"
-                        >
-                          &times;
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      onClick={addRepairItem}
-                      className="mt-4 px-4 py-2 text-sm bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
-                    >
-                      + Add Repair Item
-                    </button>
-                  </div>
-                )}
-                
-                {/* Cost Modifiers */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-2 text-indigo-600">Repair Cost Modifiers</h3>
-                  <CostInput label="Contingency" value={repairCosts.contingencyPercent} field="contingencyPercent" unit="%" handler={handleSimpleUpdate(setRepairCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">A "buffer" for unexpected repairs. 10-20% is common.</p>
-                  
-                  <CostInput label="Contractor OH&P" value={repairCosts.contractorOHPercent} field="contractorOHPercent" unit="%" handler={handleSimpleUpdate(setRepairCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Overhead & Profit for a General Contractor, if used. 10-20% is common.</p>
-
-                  <CostInput label="Location Multiplier" value={repairCosts.locationMultiplierPercent} field="locationMultiplierPercent" unit="%" handler={handleSimpleUpdate(setRepairCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Adjust for high-cost-of-living (HCOL) areas. e.g., 5% for Boulder.</p>
-
-                  <CostInput label="Permit Costs (Fixed)" value={repairCosts.permitCost} field="permitCost" unit="$" handler={handleSimpleUpdate(setRepairCosts)} />
-                  <p className="text-xs text-gray-500 pl-4 -mt-2 mb-2">Fixed cost for city/county permits, separate from other items.</p>
-                </div>
-                
-                {/* Total Repair Costs */}
-                <div className="p-4 bg-green-50 rounded-lg shadow-inner mt-4">
-                  <div className="flex justify-between items-center font-bold text-xl text-green-800">
-                    <span>Total Repair Costs (TRC):</span>
-                    <span>{formatCurrency(calculations.finalTRC)}</span>
-                  </div>
-                </div>
-                
-              </div>
-            </div>
-          );
-          
-          const Step4_Summary = () => (
-            <div>
-              <h2 className="text-2xl font-bold text-indigo-700 mb-4">Step 4: Profit & Summary</h2>
-              <div className="space-y-6">
-
-                {/* Profit Selection */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-indigo-100">
-                  <h3 className="text-xl font-semibold mb-4 text-indigo-600">Select Target Profit</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {[5, 10, 15, 20, 25, 30].map(percent => (
-                      <button
-                        key={percent}
-                        onClick={() => setTargetProfitPercent(percent)}
-                        className={`px-4 py-2 rounded-full font-semibold transition ${targetProfitPercent === percent ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-indigo-600 border border-indigo-300'}`}
-                      >
-                        {percent}% of ARV
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-4 pt-4 border-t text-center">
-                    <span className="text-gray-700 text-lg">Target Profit: </span>
-                    <span className="font-bold text-2xl text-green-700">{formatCurrency(calculations.targetProfit)}</span>
-                  </div>
-                </div>
-
-                {/* MAO & 70% Rule */}
-                <div className="bg-orange-600 text-white p-6 rounded-xl shadow-2xl border-4 border-orange-400 text-center">
-                  <div className="text-xl font-semibold mb-2">Maximum Purchase Price (MAO)</div>
-                  <div className="text-5xl font-extrabold mb-4">{formatCurrency(calculations.maxPurchasePrice)}</div>
-                  <p className="text-orange-100">This is the most you can pay to hit your {targetProfitPercent}% profit target.</p>
-                  
-                  <div className="mt-4 pt-4 border-t border-orange-400">
-                    <div className="text-lg font-semibold">70% Rule MAO (for comparison):</div>
-                    <div className="text-2xl font-bold text-orange-200">{formatCurrency(calculations.mao70Rule)}</div>
-                  </div>
-                </div>
-                
-                {/* Key Metrics */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-gray-100">
-                  <h3 className="text-xl font-semibold mb-4 text-gray-700">Key Metrics (at MAO)</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-gray-500">Profit per Month</div>
-                      <div className="text-xl font-bold text-indigo-700">{formatCurrency(calculations.profitPerMonth)}</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-gray-500">Cash ROI</div>
-                      <div className="text-xl font-bold text-indigo-700">{formatPercent(calculations.cashROI)}</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-gray-500">Annualized ROI</div>
-                      <div className="text-xl font-bold text-indigo-700">{formatPercent(calculations.annualizedROI)}</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-sm text-gray-500">Total Profit</div>
-                      <div className="text-xl font-bold text-green-700">{formatCurrency(calculations.targetProfit)}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Investment Breakdown */}
-                <div className="bg-white p-5 rounded-xl shadow-md border border-gray-100">
-                  <h3 className="text-xl font-semibold mb-4 text-gray-700">Investment Breakdown (at MAO)</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-base">
-                      <span className="text-gray-600">Capital Needed (Cash to Close)</span>
-                      <span className="font-medium text-indigo-600">{formatCurrency(calculations.capitalNeeded)}</span>
-                    </div>
-                    <div className="flex justify-between text-base">
-                      <span className="text-gray-600">Total Cash Invested (Capital + Holding + Repairs)</span>
-                      <span className="font-medium text-indigo-600">{formatCurrency(calculations.totalCashInvested)}</span>
-                    </div>
-                     <div className="flex justify-between text-base">
-                      <span className="text-gray-600">Debt (Loan Amount)</span>
-                      <span className="font-medium text-gray-600">{formatCurrency(calculations.debt)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-lg border-t pt-2 mt-2">
-                      <span>Total Project Costs</span>
-                      <span className="text-red-700">{formatCurrency(calculations.totalProjectCosts)}</span>
-                    </div>
-                  </div>
-                </div>
-                
-              </div>
-            </div>
-          );
+          const displayValue = isFocused ? localValue : (cost === 0 && !isFocused ? '' : cost);
 
           return (
-            <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
-              <h1 className="text-4xl font-extrabold text-indigo-800 mb-6 text-center">
-                House Flip Deal Analyzer 
-              </h1>
+            <input
+              type="text"
+              inputMode="numeric"
+              min="0"
+              value={displayValue}
+              onFocus={() => setIsFocused(true)}
+              onChange={handleLocalChange}
+              onBlur={handleBlur}
+              placeholder="0"
+              className="col-span-3 p-1 border rounded-md text-right text-sm"
+            />
+          );
+        };
+
+        // --- Dedicated component for Repair Item Description (Fix for focus loss) ---
+        const RepairItemDescriptionInput = ({ id, description, updateHandler }) => {
+            const [localValue, setLocalValue] = React.useState(description);
+            const [isFocused, setIsFocused] = React.useState(false);
+
+            React.useEffect(() => {
+              if (!isFocused) setLocalValue(description);
+            }, [description, isFocused]);
+
+            const handleLocalChange = (e) => setLocalValue(e.target.value);
+
+            const handleBlur = (e) => {
+              setIsFocused(false);
+              updateHandler(id, 'description', e.target.value);
+            };
+
+            return (
+                <input
+                    type="text"
+                    value={localValue}
+                    onFocus={() => setIsFocused(true)}
+                    onChange={handleLocalChange}
+                    onBlur={handleBlur}
+                    placeholder="e.g., Kitchen Cabinets"
+                    className="col-span-4 p-1 border rounded-md text-sm"
+                />
+            );
+        };
+        
+        // --- STEP 1: ARV ---
+        const Step1_ARV = ({ data, handler }) => (
+          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 space-y-4">
+            <h2 className="text-2xl font-bold text-indigo-700">Step 1: After Repair Value (ARV)</h2>
+            <CostInput
+              label="After Repair Value (ARV)"
+              value={data.arv}
+              field="arv"
+              unit="$"
+              handler={handler}
+              description="This is the estimated price the property will sell for *after* all repairs are completed."
+            />
+          </div>
+        );
+        
+        // --- STEP 2: FIXED COSTS ---
+        const Step2_FixedCosts = ({ data, handler, calculations }) => {
+          
+          const suggestFee = (field, percentage, amount) => {
+            const suggestedValue = Math.round(amount * (percentage / 100));
+            handler(field, suggestedValue);
+          };
+          
+          return (
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 space-y-8">
+              <h2 className="text-2xl font-bold text-indigo-700">Step 2: Fixed Costs</h2>
               
-              <div className="max-w-4xl mx-auto space-y-12">
-                {/* Render All Steps Sequentially */}
-                <div className="mt-8 space-y-12">
-                  <Step1_ARV />
-                  <Step2_FixedCosts />
-                  <Step3_RepairCosts />
-                  <Step4_Summary />
+              {/* --- Buying Costs --- */}
+              <div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Buying Costs</h3>
+                <CostInput
+                  label="Down Payment"
+                  value={data.downPayment}
+                  field="downPayment"
+                  unit="$"
+                  handler={handler}
+                  description="The cash you will pay upfront for the property."
+                />
+                <CostInput
+                  label="Buying Closing Costs"
+                  value={data.buyingClosingCosts}
+                  field="buyingClosingCosts"
+                  unit="$"
+                  handler={handler}
+                  description="All fees associated with the purchase (origination, appraisal, title, etc.)."
+                  extraContent={
+                    <button 
+                      onClick={() => suggestFee('buyingClosingCosts', 2.0, data.purchasePrice)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Suggest 2.0% of Purchase Price (CO Avg.)"
+                    >
+                      Suggest (2%)
+                    </button>
+                  }
+                />
+                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800">
+                    <span>Total Buying Costs (Cash Out-of-Pocket):</span>
+                    <span>{formatCurrency(calculations.totalBuyingCosts)}</span>
+                  </div>
                 </div>
+              </div>
+              
+              {/* --- Holding Costs --- */}
+              <div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Holding Costs</h3>
+                <CostInput
+                  label="Rehab Period"
+                  value={data.rehabPeriod}
+                  field="rehabPeriod"
+                  unit="mo"
+                  handler={handler}
+                  description="How many months you estimate the renovation will take."
+                />
+                <CostInput
+                  label="Listing Period"
+                  value={data.listingPeriod}
+                  field="listingPeriod"
+                  unit="mo"
+                  handler={handler}
+                  description="How many months from listing to final sale closing."
+                />
+                <div className="py-3 border-b border-gray-100">
+                   <div className="flex justify-between items-center">
+                     <label className="text-gray-700 text-sm md:text-base">Total Holding Period</label>
+                     <div className="text-base font-bold text-indigo-600">
+                       {calculations.totalHoldingPeriod} months
+                     </div>
+                   </div>
+                   <p className="text-xs text-gray-500 mt-1">This is the total time you will be paying for the property (Rehab + Listing).</p>
+                </div>
+                
+                <h4 className="text-lg font-semibold text-gray-700 mt-6 mb-2">Monthly Holding Costs</h4>
+                <CostInput
+                  label="PITI (or Debt Service)"
+                  value={data.monthlyPITI}
+                  field="monthlyPITI"
+                  unit="$"
+                  handler={handler}
+                  description="Principal, Interest, Taxes, and Insurance. (Or just Interest if hard money)."
+                />
+                <CostInput
+                  label="Utilities (Water, Electric, Gas)"
+                  value={data.monthlyUtilities}
+                  field="monthlyUtilities"
+                  unit="$"
+                  handler={handler}
+                  description="All utilities needed to keep the property running during rehab and listing."
+                />
+                <CostInput
+                  label="Insurance (Property/Liability)"
+                  value={data.monthlyInsurance}
+                  field="monthlyInsurance"
+                  unit="$"
+                  handler={handler}
+                  description="Builder's Risk or Vacant Dwelling policy. (May be part of PITI)."
+                />
+                <CostInput
+                  label="HOA Dues"
+                  value={data.monthlyHOA}
+                  field="monthlyHOA"
+                  unit="$"
+                  handler={handler}
+                  description="Any required Homeowner's Association dues."
+                />
+                <CostInput
+                  label="Maintenance (Lawn, Snow)"
+                  value={data.monthlyMaintenance}
+                  field="monthlyMaintenance"
+                  unit="$"
+                  handler={handler}
+                  description="Ongoing maintenance like lawn care or snow removal."
+                />
+                <CostInput
+                  label="Other Monthly Costs"
+                  value={data.monthlyOther}
+                  field="monthlyOther"
+                  unit="$"
+                  handler={handler}
+                  description="Any other recurring monthly expenses."
+                />
+                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800">
+                    <span>Total Holding Costs (Monthly):</span>
+                    <span>{formatCurrency(calculations.totalMonthlyHoldingCosts)} / mo</span>
+                  </div>
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800 mt-2">
+                    <span>Total Project Holding Costs:</span>
+                    <span>{formatCurrency(calculations.totalProjectHoldingCosts)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* --- Selling Costs --- */}
+              <div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Selling Costs</h3>
+                <CostInput
+                  label="Brokerage Fee"
+                  value={data.brokerageFee}
+                  field="brokerageFee"
+                  unit="%"
+                  handler={handler}
+                  description="Total commission paid to both buyer's and seller's agents."
+                  extraContent={
+                    <button 
+                      onClick={() => handler('brokerageFee', 5.0)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Set to 5.0% (CO Avg.)"
+                    >
+                      Suggest (5%)
+                    </button>
+                  }
+                />
+                <CostInput
+                  label="Seller Concessions"
+                  value={data.sellerConcessions}
+                  field="sellerConcessions"
+                  unit="%"
+                  handler={handler}
+                  description="Money offered to the buyer to help with their closing costs."
+                  extraContent={
+                    <button 
+                      onClick={() => handler('sellerConcessions', 1.0)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Set to 1.0% (Common)"
+                    >
+                      Suggest (1%)
+                    </button>
+                  }
+                />
+                <CostInput
+                  label="Owner's Title Insurance"
+                  value={data.ownersTitleInsurance}
+                  field="ownersTitleInsurance"
+                  unit="$"
+                  handler={handler}
+                  description="Policy protecting the new buyer from title defects. (Seller typically pays in CO)."
+                  extraContent={
+                    <button 
+                      onClick={() => suggestFee('ownersTitleInsurance', 0.5, data.arv)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Suggest 0.5% of ARV (CO Avg.)"
+                    >
+                      Suggest (0.5%)
+                    </button>
+                  }
+                />
+                <CostInput
+                  label="Home Warranty"
+                  value={data.homeWarranty}
+                  field="homeWarranty"
+                  unit="$"
+                  handler={handler}
+                  description="Optional one-year warranty for the buyer."
+                  extraContent={
+                    <button 
+                      onClick={() => handler('homeWarranty', 600)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Suggest $600"
+                    >
+                      Suggest ($600)
+                    </button>
+                  }
+                />
+                <CostInput
+                  label="Staging"
+                  value={data.staging}
+                  field="staging"
+                  unit="$"
+                  handler={handler}
+                  description="Cost to furnish and stage the home for sale."
+                />
+                 <CostInput
+                  label="2nd Appraisal / BPO"
+                  value={data.secondAppraisal}
+                  field="secondAppraisal"
+                  unit="$"
+                  handler={handler}
+                  description="Cost for a post-rehab appraisal or BPO (Broker Price Opinion)."
+                  extraContent={
+                    <button 
+                      onClick={() => handler('secondAppraisal', 500)}
+                      className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded-full hover:bg-indigo-200 transition"
+                      title="Suggest $500"
+                    >
+                      Suggest ($500)
+                    </button>
+                  }
+                />
+                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800">
+                    <span>Total Selling Costs:</span>
+                    <span>{formatCurrency(calculations.totalSellingCosts)}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* --- Financing Costs --- */}
+              <div>
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Financing Costs</h3>
+                <CostInput
+                  label="Loan Origination / Points"
+                  value={data.loanOrigination}
+                  field="loanOrigination"
+                  unit="$"
+                  handler={handler}
+                  description="Upfront fees paid to the lender to get the loan (often % of loan amount)."
+                />
+                <CostInput
+                  label="Loan Interest (Non-Monthly)"
+                  value={data.loanInterest}
+                  field="loanInterest"
+                  unit="$"
+                  handler={handler}
+                  description="Any interest payments NOT included in your monthly PITI (e.g., prepaid)."
+                />
+                <CostInput
+                  label="Other Financing Fees"
+                  value={data.otherFinancing}
+                  field="otherFinancing"
+                  unit="$"
+                  handler={handler}
+                  description="Junk fees, processing, underwriting, etc."
+                />
+                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800">
+                    <span>Total Financing Costs (Upfront):</span>
+                    <span>{formatCurrency(calculations.totalFinancingCosts)}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* --- TOTAL FIXED COSTS --- */}
+              <div className="p-6 bg-green-50 rounded-lg shadow-inner mt-8 border-2 border-green-300">
+                <div className="flex justify-between items-center font-bold text-2xl text-green-800">
+                  <span>Total Fixed Costs (Excl. Rehab):</span>
+                  <span>{formatCurrency(calculations.totalFixedCosts)}</span>
+                </div>
+                <p className="text-sm text-green-600 mt-1">Total of Buying, Holding, Selling, and Financing costs.</p>
               </div>
             </div>
           );
         };
         
-        // ** FIX for Console Warning **
-        // Using the modern React 18 createRoot API.
-        // This resolves the console warning, but can be unstable in some preview environments.
+        // --- STEP 3: REPAIR COSTS ---
+        const Step3_RepairCosts = ({ data, handler, addRepairItem, removeRepairItem, updateRepairItem, calculations }) => (
+          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 space-y-6">
+            <h2 className="text-2xl font-bold text-indigo-700">Step 3: Repair Costs (Rehab Budget)</h2>
+            
+            {/* Itemized Input */}
+            <div>
+              <h3 className="text-xl font-semibold mb-4 text-gray-800">Itemized Rehab Breakdown</h3>
+              <div className="grid grid-cols-12 gap-2 font-semibold text-sm text-gray-600 border-b pb-2 mb-2">
+                <div className="col-span-4">Category</div>
+                <div className="col-span-4">Description</div>
+                <div className="col-span-3 text-right">Cost ($)</div>
+                <div className="col-span-1"></div>
+              </div>
+              {data.repairItems.map((item) => (
+                <div key={item.id} className="grid grid-cols-12 gap-2 items-center py-2 border-b border-gray-100">
+                  <select
+                    value={item.category}
+                    onChange={(e) => updateRepairItem(item.id, 'category', e.target.value)}
+                    className="col-span-4 p-1 border rounded-md text-sm"
+                  >
+                    <option>Permits & Plans</option>
+                    <option>Demolition & Debris</option>
+                    <option>Foundation & Structural</option>
+                    <option>Roofing</option>
+                    <option>Siding & Exterior Trim</option>
+                    <option>Windows & Exterior Doors</option>
+                    <option>HVAC System</option>
+                    <option>Plumbing System</option>
+                    <option>Electrical System</option>
+                    <option>Insulation & Drywall</option>
+                    <option>Interior Paint & Trim</option>
+                    <option>Flooring (Hardwood, Carpet, Tile)</option>
+                    <option>Kitchen Cabinets & Countertops</option>
+                    <option>Kitchen Appliances</option>
+                    <option>Bathrooms</option>
+                    <option>Lighting & Fixtures</option>
+                    <option>Landscaping & Hardscape</option>
+                    <option>Decks, Patios & Porches</option>
+                    <option>Garage & Driveway</option>
+                    <option>Safety & Security</option>
+                    <option>Warranties & Punchlist</option>
+                    <option>General Labor & Cleaning</option>
+                    <option>Other Contingency/Misc</option>
+                  </select>
+                  <RepairItemDescriptionInput 
+                    id={item.id}
+                    description={item.description}
+                    updateHandler={updateRepairItem}
+                  />
+                  <RepairItemCostInput
+                    id={item.id}
+                    cost={item.cost}
+                    updateHandler={updateRepairItem}
+                  />
+                  <button
+                    onClick={() => removeRepairItem(item.id)}
+                    className="col-span-1 text-red-500 hover:text-red-700 transition"
+                    title="Remove Item"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={addRepairItem}
+                className="mt-4 px-4 py-2 text-sm bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+              >
+                + Add Repair Item
+              </button>
+              <div className="p-4 bg-gray-100 rounded-lg shadow-inner mt-4">
+                <div className="flex justify-between items-center font-bold text-lg text-gray-800">
+                  <span>Sub-Total Itemized Repairs:</span>
+                  <span>{formatCurrency(calculations.itemizedRepairCosts)}</span>
+                </div>
+              </div>
+            </div>
+            
+            {/* Multipliers & Contingency */}
+            <div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">Adjustments & Contingency</h3>
+              <CostInput
+                label="Repair Contingency"
+                value={data.repairContingency}
+                field="repairContingency"
+                unit="%"
+                handler={handler}
+                description="Buffer for unexpected rehab costs (10-20% is common)."
+              />
+              <CostInput
+                label="Location Multiplier"
+                value={data.locationMultiplier}
+                field="locationMultiplier"
+                unit="%"
+                handler={handler}
+                description="Adjust repair costs for high-cost areas (e.g., 10% for Boulder)."
+              />
+              <CostInput
+                label="Contractor OH&P"
+                value={data.contractorOHP}
+                field="contractorOHP"
+                unit="%"
+                handler={handler}
+                description="Overhead & Profit for a General Contractor (10-20% is common)."
+              />
+              <CostInput
+                label="Permit Costs (Flat Fee)"
+                value={data.permitCosts}
+                field="permitCosts"
+                unit="$"
+                handler={handler}
+                description="Flat cost for all required permits."
+              />
+            </div>
+            
+            {/* --- TOTAL REPAIR COSTS --- */}
+            <div className="p-6 bg-green-50 rounded-lg shadow-inner mt-8 border-2 border-green-300">
+              <div className="flex justify-between items-center font-bold text-2xl text-green-800">
+                <span>Total Repair Costs:</span>
+                <span>{formatCurrency(calculations.totalRepairCosts)}</span>
+              </div>
+              <p className="text-sm text-green-600 mt-1">Itemized costs + adjustments & contingency.</p>
+            </div>
+          </div>
+        );
+
+        // --- STEP 4: PROFIT & ANALYSIS ---
+        const Step4_Analysis = ({ data, handler, calculations }) => {
+          
+          const profitMarginOptions = [5, 10, 15, 20, 25, 30];
+          
+          return (
+            <div className="space-y-8">
+              <h2 className="text-2xl font-bold text-indigo-700">Step 4: Profit & Analysis</h2>
+              
+              {/* --- Your Purchase Price --- */}
+              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Your Purchase Price</h3>
+                <CostInput
+                  label="Your Purchase Price"
+                  value={data.purchasePrice}
+                  field="purchasePrice"
+                  unit="$"
+                  handler={handler}
+                  description="Enter your actual or potential purchase price to calculate your profit."
+                />
+              </div>
+
+              {/* --- Target Profit --- */}
+              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Target Profit</h3>
+                <div className="py-3">
+                  <label htmlFor="profitMargin" className="text-gray-700 text-sm md:text-base">Select Desired Profit (% of ARV)</label>
+                  <select
+                    id="profitMargin"
+                    value={data.targetProfitMargin}
+                    onChange={(e) => handler('targetProfitMargin', parseFloat(e.target.value))}
+                    className="mt-2 w-full p-2 border rounded-md"
+                  >
+                    {profitMarginOptions.map(opt => (
+                      <option key={opt} value={opt}>{opt}%</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="p-4 bg-indigo-50 rounded-lg shadow-inner mt-4">
+                  <div className="flex justify-between items-center font-bold text-lg text-indigo-800">
+                    <span>Target Profit (in Dollars):</span>
+                    <span>{formatCurrency(calculations.targetProfitDollars)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* --- ANALYSIS & MAO --- */}
+              <div className="bg-orange-50 p-6 rounded-xl shadow-lg border-2 border-orange-300 space-y-6">
+                <h2 className="text-2xl font-bold text-orange-700">Deal Analysis</h2>
+                
+                {/* MAO */}
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-800">Maximum Allowable Offer (MAO)</h3>
+                  <div className="p-4 bg-white rounded-lg shadow-inner mt-2">
+                    <div className="flex justify-between items-center font-bold text-3xl text-indigo-700">
+                      <span>MAO (Based on Your Target Profit):</span>
+                      <span>{formatCurrency(calculations.maxPurchasePrice)}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">This is the max you can pay to hit your {data.targetProfitMargin}% profit target.</p>
+                  </div>
+                </div>
+                
+                {/* 70% Rule */}
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-800">70% Rule Comparison</h3>
+                  <div className="p-4 bg-white rounded-lg shadow-inner mt-2">
+                    <div className="flex justify-between items-center font-bold text-xl text-gray-700">
+                      <span>70% Rule MAO (Quick Check):</span>
+                      <span>{formatCurrency(calculations.mao70Rule)}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">(ARV * 70%) - Total Repair Costs</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* --- YOUR DEAL METRICS (Based on Your Price) --- */}
+              <div className="bg-green-50 p-6 rounded-xl shadow-lg border-2 border-green-300 space-y-6">
+                <h2 className="text-2xl font-bold text-green-800">Your Deal Metrics (Based on Your Price)</h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white rounded-lg shadow-inner">
+                    <div className="text-sm text-gray-600">Your Potential Profit</div>
+                    <div className="text-3xl font-bold text-green-700">{formatCurrency(calculations.potentialProfit)}</div>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-inner">
+                    <div className="text-sm text-gray-600">Profit per Month</div>
+                    <div className="text-3xl font-bold text-green-700">{formatCurrency(calculations.profitPerMonth)}</div>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-inner">
+                    <div className="text-sm text-gray-600">Cash-on-Cash ROI</div>
+                    <div className="text-3xl font-bold text-green-700">{formatPercent(calculations.cashOnCashROI)}</div>
+                  </div>
+                  <div className="p-4 bg-white rounded-lg shadow-inner">
+                    <div className="text-sm text-gray-600">Annualized ROI</div>
+                    <div className="text-3xl font-bold text-green-700">{formatPercent(calculations.annualizedROI)}</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* --- Investment Breakdown --- */}
+              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+                <h3 className="text-xl font-semibold text-gray-800 mb-4">Investment Breakdown</h3>
+                
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">Total Project Cost:</span>
+                  <span className="font-bold text-lg">{formatCurrency(calculations.totalProjectCost)}</span>
+                </div>
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">Total Capital Needed (Cash):</span>
+                  <span className="font-bold text-lg text-blue-600">{formatCurrency(calculations.totalCapitalNeeded)}</span>
+                </div>
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">&nbsp;&nbsp;&nbsp; - Down Payment:</span>
+                  <span className="font-medium">{formatCurrency(data.downPayment)}</span>
+                </div>
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">&nbsp;&nbsp;&nbsp; - Buying Costs:</span>
+                  <span className="font-medium">{formatCurrency(calculations.totalBuyingCosts - data.downPayment)}</span>
+                </div>
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">&nbsp;&nbsp;&nbsp; - Total Repair Costs:</span>
+                  <span className="font-medium">{formatCurrency(calculations.totalRepairCosts)}</span>
+                </div>
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">&nbsp;&Semicolon; - Total Holding Costs:</span>
+                  <span className="font-medium">{formatCurrency(calculations.totalProjectHoldingCosts)}</span>
+                </div>
+                 <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">&nbsp;&nbsp;&nbsp; - Upfront Financing Costs:</span>
+                  <span className="font-medium">{formatCurrency(calculations.totalFinancingCosts)}</span>
+                </div>
+                
+                <div className="py-2 border-b flex justify-between">
+                  <span className="text-gray-600">Total Debt (Loan Amount):</span>
+                  <span className="font-bold text-lg">{formatCurrency(calculations.totalDebt)}</span>
+                </div>
+                
+              </div>
+
+            </div>
+          );
+        };
+
+
+        // --- Main App Component ---
+        const Root = () => {
+          
+          // --- STATE ---
+          const [data, setData] = React.useState({
+            // Step 1
+            arv: 0,
+            // Step 4 (Moved up for calc)
+            purchasePrice: 0,
+            // Step 2
+            downPayment: 0,
+            buyingClosingCosts: 0,
+            rehabPeriod: 0,
+            listingPeriod: 0,
+            monthlyPITI: 0,
+            monthlyUtilities: 0,
+            monthlyInsurance: 0,
+            monthlyHOA: 0,
+            monthlyMaintenance: 0,
+            monthlyOther: 0,
+            brokerageFee: 5.0,
+            sellerConcessions: 1.0,
+            ownersTitleInsurance: 0,
+            homeWarranty: 0,
+            staging: 0,
+            secondAppraisal: 0,
+            loanOrigination: 0,
+            loanInterest: 0,
+            otherFinancing: 0,
+            // Step 3
+            repairItems: [],
+            repairContingency: 10.0,
+            locationMultiplier: 0,
+            contractorOHP: 0,
+            permitCosts: 0,
+            // Step 4
+            targetProfitMargin: 15.0,
+          });
+
+          // --- HANDLERS ---
+          const handleInputChange = (field, value) => {
+            setData(prev => ({
+              ...prev,
+              [field]: value,
+            }));
+          };
+
+          const addRepairItem = () => {
+            setData(prev => ({
+              ...prev,
+              repairItems: [
+                ...prev.repairItems,
+                { id: Date.now(), category: 'General Labor & Cleaning', description: '', cost: 0 },
+              ],
+            }));
+          };
+
+          const removeRepairItem = (id) => {
+            setData(prev => ({
+              ...prev,
+              repairItems: prev.repairItems.filter(item => item.id !== id),
+            }));
+          };
+
+          const updateRepairItem = (id, field, value) => {
+            setData(prev => ({
+              ...prev,
+              repairItems: prev.repairItems.map(item =>
+                item.id === id ? { ...item, [field]: value } : item
+              ),
+            }));
+          };
+          
+          // --- CALCULATIONS ---
+          const calculations = React.useMemo(() => {
+            const arv = data.arv || 0;
+            const purchasePrice = data.purchasePrice || 0;
+            
+            // --- Step 2 Calculations ---
+            const totalBuyingCosts = data.downPayment + data.buyingClosingCosts;
+            
+            const totalMonthlyHoldingCosts = data.monthlyPITI + data.monthlyUtilities + data.monthlyInsurance + data.monthlyHOA + data.monthlyMaintenance + data.monthlyOther;
+            const totalHoldingPeriod = data.rehabPeriod + data.listingPeriod;
+            const totalProjectHoldingCosts = totalMonthlyHoldingCosts * totalHoldingPeriod;
+            
+            const totalSellingCosts = (arv * (data.brokerageFee / 100)) + (arv * (data.sellerConcessions / 100)) + data.ownersTitleInsurance + data.homeWarranty + data.staging + data.secondAppraisal;
+            
+            const totalFinancingCosts = data.loanOrigination + data.loanInterest + data.otherFinancing;
+            
+            const totalFixedCosts = totalBuyingCosts - data.downPayment + totalProjectHoldingCosts + totalSellingCosts + totalFinancingCosts;
+
+            // --- Step 3 Calculations ---
+            const itemizedRepairCosts = data.repairItems.reduce((sum, item) => sum + item.cost, 0);
+            const contingencyAmount = itemizedRepairCosts * (data.repairContingency / 100);
+            const locationAmount = itemizedRepairCosts * (data.locationMultiplier / 100);
+            const ohpAmount = itemizedRepairCosts * (data.contractorOHP / 100);
+            
+            const totalRepairCosts = itemizedRepairCosts + contingencyAmount + locationAmount + ohpAmount + data.permitCosts;
+            
+            // --- Step 4 Calculations ---
+            const targetProfitDollars = arv * (data.targetProfitMargin / 100);
+            
+            // MAO (Based on Target Profit)
+            // ARV - All Fixed Costs - All Repair Costs - Target Profit = MAO
+            const maxPurchasePrice = arv - totalFixedCosts - totalRepairCosts - targetProfitDollars;
+            
+            // 70% Rule (Quick Check)
+            const mao70Rule = (arv * 0.70) - totalRepairCosts;
+
+            // --- Your Deal Metrics (Based on Your Purchase Price) ---
+            const totalProjectCost = purchasePrice + totalFixedCosts + totalRepairCosts;
+            const potentialProfit = arv - totalProjectCost;
+            
+            const profitPerMonth = totalHoldingPeriod > 0 ? (potentialProfit / totalHoldingPeriod) : 0;
+            
+            // Total Capital Needed (Cash) = Down Payment + Buying Costs (non-DP) + Repair Costs + Holding Costs + Financing Costs
+            const totalCapitalNeeded = data.downPayment + (totalBuyingCosts - data.downPayment) + totalRepairCosts + totalProjectHoldingCosts + totalFinancingCosts;
+            
+            const cashOnCashROI = totalCapitalNeeded > 0 ? (potentialProfit / totalCapitalNeeded) : 0;
+            
+            const annualizedROI = totalHoldingPeriod > 0 ? (cashOnCashROI * (12 / totalHoldingPeriod)) : 0;
+
+            // Investment Breakdown
+            const totalDebt = (purchasePrice - data.downPayment);
+            
+            return {
+              // Step 2
+              totalBuyingCosts,
+              totalMonthlyHoldingCosts,
+              totalHoldingPeriod,
+              totalProjectHoldingCosts,
+              totalSellingCosts,
+              totalFinancingCosts,
+              totalFixedCosts,
+              // Step 3
+              itemizedRepairCosts,
+              totalRepairCosts,
+              // Step 4
+              targetProfitDollars,
+              maxPurchasePrice,
+              mao70Rule,
+              potentialProfit,
+              profitPerMonth,
+              totalCapitalNeeded,
+              cashOnCashROI,
+              annualizedROI,
+              totalProjectCost,
+              totalDebt
+            };
+          }, [data]);
+          
+
+          return (
+            <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
+              <h1 className="text-4xl font-extrabold text-indigo-800 mb-8 text-center">
+                House Flip Deal Analyzer
+              </h1>
+
+              {/* All steps rendered on one page */}
+              <div className="max-w-4xl mx-auto space-y-12">
+                <Step1_ARV data={data} handler={handleInputChange} />
+                <Step2_FixedCosts data={data} handler={handleInputChange} calculations={calculations} />
+                <Step3_RepairCosts 
+                  data={data} 
+                  handler={handleInputChange} 
+                  addRepairItem={addRepairItem}
+                  removeRepairItem={removeRepairItem}
+                  updateRepairItem={updateRepairItem}
+                  calculations={calculations} 
+                />
+                <Step4_Analysis data={data} handler={handleInputChange} calculations={calculations} />
+              </div>
+
+            </div>
+          );
+        };
+        
+        // Render the Root component using the modern React 18 createRoot API
+        // This fixes the console warning.
         const container = document.getElementById('root');
         if (container) {
           const root = ReactDOM.createRoot(container);
           root.render(<Root />);
         } else {
-          console.error("Root element not found. The app could not be started.");
+          console.error("Root element not found.");
         }
     </script>
 </body>
